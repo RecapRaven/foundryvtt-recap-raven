@@ -2,7 +2,7 @@
   "id": "recap-raven",
   "title": "Recap Raven",
   "description": "Import player-safe campaign recaps as native Foundry journals.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "authors": [{ "name": "Recap Raven", "url": "https://recapraven.com" }],
   "compatibility": { "minimum": "14", "maximum": "14" },
   "esmodules": ["recap-raven.js"],
@@ -10,5 +10,5 @@
   "languages": [{ "lang": "en", "name": "English", "path": "lang/en.json" }],
   "url": "https://github.com/RecapRaven/foundryvtt-recap-raven",
   "manifest": "https://github.com/RecapRaven/foundryvtt-recap-raven/releases/latest/download/module.json",
-  "download": "https://github.com/RecapRaven/foundryvtt-recap-raven/releases/download/v1.0.0/recap-raven.zip"
+  "download": "https://github.com/RecapRaven/foundryvtt-recap-raven/releases/download/v1.0.1/recap-raven.zip"
 }
