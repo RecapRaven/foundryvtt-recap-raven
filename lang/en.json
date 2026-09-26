@@ -1,0 +1,7 @@
+{
+  "RECAP_RAVEN": {
+    "Title": "Recap Raven",
+    "Setup": "Connection and recap journals",
+    "SetupHint": "Connect to Recap Raven, manage Ask visibility, and import session journals."
+  }
+}

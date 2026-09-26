@@ -1,0 +1,55 @@
+{
+  "name": "foundryvtt-recap-raven",
+  "version": "1.0.0",
+  "description": "Player-safe Recap Raven journals for Foundry Virtual Tabletop.",
+  "private": true,
+  "main": "dist/recap-raven.js",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0 && stylelint \"styles/*.css\" --max-warnings=0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "check": "npm run lint && npm run test:coverage && npm run build && npm run verify:release",
+    "format": "prettier --write src tests scripts *.json *.ts *.mjs styles lang docs README.md CONTRIBUTING.md SECURITY.md"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "foundryvtt",
+    "ttrpg",
+    "session-recap"
+  ],
+  "author": "Recap Raven",
+  "homepage": "https://recapraven.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RecapRaven/foundryvtt-recap-raven.git"
+  },
+  "bugs": {
+    "url": "https://github.com/RecapRaven/foundryvtt-recap-raven/issues"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.18.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.4",
+    "globals": "^17.11.0",
+    "stylelint": "^17.14.1",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11",
+    "fflate": "^0.8.2",
+    "jsdom": "^29.0.0",
+    "prettier": "^3.8.0"
+  },
+  "dependencies": {
+    "dompurify": "^3.3.0",
+    "marked": "^17.0.0"
+  }
+}

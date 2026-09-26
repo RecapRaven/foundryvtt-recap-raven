@@ -1,0 +1,174 @@
+name: Security
+
+on:
+  pull_request_target:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authorize_pr:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.permission.outputs.allowed }}
+    steps:
+      - name: Verify the pull request author
+        id: permission
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (pr.head.repo?.id !== context.payload.repository.id) {
+              core.setOutput('allowed', 'false');
+              return;
+            }
+            const author = pr.user;
+            const isDependabot = author.login === 'dependabot[bot]' && author.type === 'Bot' && author.id === 49699333;
+            let isAdministrator = false;
+
+            if (!isDependabot) {
+              try {
+                const response = await github.rest.repos.getCollaboratorPermissionLevel({
+                  ...context.repo,
+                  username: author.login,
+                });
+                isAdministrator = response.data.permission === 'admin';
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            core.setOutput('allowed', String(isDependabot || isAdministrator));
+
+  dependency-review:
+    if: ${{ always() && github.event_name == 'pull_request_target' && needs.authorize_pr.outputs.allowed == 'true' }}
+    needs:
+      - authorize_pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+
+  dependency-audit:
+    if: ${{ always() && (github.event_name != 'pull_request_target' || needs.authorize_pr.outputs.allowed == 'true') }}
+    needs:
+      - authorize_pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit production and development dependencies
+        run: npm audit --audit-level=high
+
+  codeql:
+    if: ${{ always() && (github.event_name != 'pull_request_target' || needs.authorize_pr.outputs.allowed == 'true') }}
+    needs:
+      - authorize_pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: javascript-typescript
+          build-mode: none
+
+      - name: Analyze JavaScript and TypeScript
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+
+  gitleaks:
+    if: ${{ always() && (github.event_name != 'pull_request_target' || needs.authorize_pr.outputs.allowed == 'true') }}
+    needs:
+      - authorize_pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Scan Git history for secrets
+        uses: docker://zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f # v8.30.1
+        with:
+          args: detect --source=/github/workspace --redact --no-banner --verbose --exit-code=1
+
+  record-pr-checks:
+    if: ${{ always() && github.event_name == 'pull_request_target' && needs.authorize_pr.outputs.allowed == 'true' }}
+    needs:
+      - authorize_pr
+      - dependency-review
+      - dependency-audit
+      - codeql
+      - gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Record trusted security results on the pull request head
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const results = {
+              'dependency-review': '${{ needs.dependency-review.result }}',
+              'dependency-audit': '${{ needs.dependency-audit.result }}',
+              codeql: '${{ needs.codeql.result }}',
+              gitleaks: '${{ needs.gitleaks.result }}',
+            };
+            const targetUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            for (const [name, result] of Object.entries(results)) {
+              await github.rest.repos.createCommitStatus({
+                ...context.repo,
+                sha: context.payload.pull_request.head.sha,
+                state: result === 'success' ? 'success' : 'failure',
+                context: name,
+                description: `Trusted ${name} validation`,
+                target_url: targetUrl,
+              });
+            }

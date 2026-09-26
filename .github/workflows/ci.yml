@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request_target:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authorize_pr:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.permission.outputs.allowed }}
+    steps:
+      - name: Verify the pull request author
+        id: permission
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (pr.head.repo?.id !== context.payload.repository.id) {
+              core.setOutput('allowed', 'false');
+              return;
+            }
+            const author = pr.user;
+            const isDependabot = author.login === 'dependabot[bot]' && author.type === 'Bot' && author.id === 49699333;
+            let isAdministrator = false;
+
+            if (!isDependabot) {
+              try {
+                const response = await github.rest.repos.getCollaboratorPermissionLevel({
+                  ...context.repo,
+                  username: author.login,
+                });
+                isAdministrator = response.data.permission === 'admin';
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            core.setOutput('allowed', String(isDependabot || isAdministrator));
+
+  check:
+    if: ${{ always() && (github.event_name != 'pull_request_target' || needs.authorize_pr.outputs.allowed == 'true') }}
+    needs:
+      - authorize_pr
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Validate GitHub Actions workflows
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # v1.7.12
+        with:
+          args: -color .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/security.yml
+
+      - name: Lint, test, build, and verify release assets
+        run: make check
+
+      - name: Upload production bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: recap-raven-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            dist/recap-raven.zip
+            dist/module.json
+
+  record-pr-check:
+    if: ${{ always() && github.event_name == 'pull_request_target' && needs.authorize_pr.outputs.allowed == 'true' }}
+    needs:
+      - authorize_pr
+      - check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Record trusted CI result on the pull request head
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: '${{ needs.check.result }}' === 'success' ? 'success' : 'failure',
+              context: 'check',
+              description: 'Trusted owner-maintained CI validation',
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
